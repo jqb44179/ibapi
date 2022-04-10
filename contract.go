@@ -2,7 +2,7 @@ package ibapi
 
 import "fmt"
 
-//Contract describes an instrument's definition
+// Contract describes an instrument's definition
 type Contract struct {
 	ContractID      int64
 	Symbol          string

@@ -1,6 +1,10 @@
 package ibapi
 
 import (
+	"bytes"
+	"encoding/binary"
+	"encoding/hex"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -653,9 +657,18 @@ func (w Wrapper) CurrentTime(t time.Time) {
 }
 
 func (w Wrapper) Error(reqID int64, errCode int64, errString string) {
+	bs, err := hex.DecodeString(strings.Replace(errString, `\u`, ``, -1))
+	if err != nil {
+		return
+	}
+	var newString string
+	for i, bl, br, r := 0, len(bs), bytes.NewReader(bs), uint16(0); i < bl; i += 2 {
+		binary.Read(br, binary.BigEndian, &r)
+		newString += string(r)
+	}
 	log.With(zap.Int64("reqID", reqID)).Info("<Error>",
 		zap.Int64("errCode", errCode),
-		zap.String("errString", errString),
+		zap.String("errString", newString),
 	)
 }
 
