@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -243,7 +244,10 @@ comfirmReadyLoop:
 			MsgID, _ := strconv.ParseInt(string(f[0]), 10, 64)
 
 			ic.decoder.interpret(m)
-
+			// 处理单据好
+			if MsgID == 9{
+				ic.updateReqId(bytesToInt(f[2]))
+			}
 			// check and del the msg ID
 			for i, ID := range comfirmMsgIDs {
 				if MsgID == ID {
@@ -251,7 +255,6 @@ comfirmReadyLoop:
 					break
 				}
 			}
-
 			// if all are checked, connect ack
 			if len(comfirmMsgIDs) == 0 {
 				ic.setConnState(CONNECTED)
@@ -1414,12 +1417,12 @@ Result will be delivered via wrapper.AccountSummary().
 	The ID of the data request. Ensures that responses are matched
     to requests If several requests are in process.
 @param groupName:
-	Set to All to returnrn account summary data for all accounts,
+	Set to All to return account summary data for all accounts,
 	or set to a specific Advisor Account Group name that has already been created in TWS Global Configuration.
 @param tags:
 	A comma-separated list of account tags.
 Available tags are:
-	accountountType
+	AccountType
 	NetLiquidation,
 	TotalCashValue - Total cash including futures pnl
 	SettledCash - For cash accounts, this is the same as
@@ -3026,5 +3029,24 @@ func (ic *IbClient) LoopUntilDone(fs ...func()) error {
 	case <-ic.done:
 		return ic.err
 	}
+}
+/**
+更新orderId
+ */
+func (ic *IbClient) updateReqId(reqId int64) {
+	if reqId > ic.reqIDSeq{
+		ic.reqIDSeq = reqId
+	}
+}
+
+func bytesToInt(bys []byte) int64 {
+	length := float64(len(bys)) - 1
+	var x float64
+	for _, value := range bys {
+		tmp := math.Pow(10, length)
+		x = x + (float64(value)-48)*tmp
+		length--
+	}
+	return int64(x)
 
 }
