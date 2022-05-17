@@ -8,10 +8,11 @@ import (
 var Ic *IbClient
 var actionStatus bool
 
-var undoneContracts map[int64]undoneContract
+//var w.undoneContracts map[int64]undoneContract
 
 type CWrapper struct {
 	Wrapper
+	undoneContracts map[int64]undoneContract
 }
 type undoneContract struct {
 	Contract
@@ -44,18 +45,17 @@ func (w *CWrapper) CompletedOrder(contract *Contract, order *Order, orderState *
   1）记录两个订单的情况
 */
 func (w CWrapper) OpenOrder(orderID int64, contract *Contract, order *Order, orderState *OrderState) {
-	fmt.Println(contract, order, orderState)
 	// 收到所有的信息
-	fmt.Println("接收到订单状态信息,开始检测", contract, order, orderState)
-	if contract.Symbol == "SPX" && orderState.Status == "Submitted" {
-		fmt.Println("接收到SPX已提交的订单,加入到undoneContracts")
-		undoneContracts[contract.ContractID] = undoneContract{
+	fmt.Println("接收到订单状态更变信息,开始检测", contract, order, orderState)
+	if contract.Symbol == "SPX" && orderState.Status == "PreSubmitted" && w.undoneContracts[order.PermID].PermID != order.PermID {
+		fmt.Println("接收到SPX已提交的订单,加入到w.undoneContracts")
+		w.undoneContracts[order.PermID] = undoneContract{
 			*contract,
 			*orderState,
 			*order,
 		}
 	}
-	fmt.Println("接收到订单状态信息,结束检测", len(undoneContracts))
+	fmt.Println("接收到订单状态更变信息,结束检测", len(w.undoneContracts))
 }
 
 /**
@@ -68,14 +68,17 @@ func (w CWrapper) OpenOrder(orderID int64, contract *Contract, order *Order, ord
 */
 func (w CWrapper) ExecDetails(reqID int64, contract *Contract, execution *Execution) {
 	fmt.Println("接收到订单完成信息,开始检测", reqID, contract, execution)
-	if contract.Symbol == "SPX" && undoneContracts[contract.ContractID].ContractID == contract.ContractID {
-		//_ := undoneContracts[contract.ContractID]
+	if contract.Symbol == "SPX" && w.undoneContracts[execution.PermID].PermID == execution.PermID {
 		// 从未完成中剔除
-		delete(undoneContracts, contract.ContractID)
-		fmt.Println("接收到SPX已完成的订单,并且在记录的未完成的订单中,现在开始取消订单")
+		delete(w.undoneContracts, execution.PermID)
+		fmt.Println("现存在需要处理的订单数为:", len(w.undoneContracts))
+		if len(w.undoneContracts) < 1 {
+			fmt.Println("没有需要处理的订单,跳过")
+			return
+		}
 		Ic.ReqGlobalCancel()
 		// 开始循环处理
-		for _, c := range undoneContracts {
+		for _, c := range w.undoneContracts {
 			newContract := Contract{
 				Symbol:       c.Symbol,
 				SecurityType: c.SecurityType,
@@ -87,14 +90,8 @@ func (w CWrapper) ExecDetails(reqID int64, contract *Contract, execution *Execut
 				Currency:     c.Currency,
 				TradingClass: c.TradingClass,
 			}
-			actionType := ""
-			if undoneContracts[c.ContractID].OrderType == "SELL" {
-				actionType = "BUY"
-			} else {
-				actionType = "SELL"
-			}
-			fmt.Println("现在对目标进行平仓:", newContract.Symbol+newContract.Expiry, actionType, undoneContracts[c.ContractID].TotalQuantity)
-			marketOrder := NewMarketOrder(actionType, undoneContracts[c.ContractID].TotalQuantity)
+			fmt.Println("现在对目标进行平仓:", newContract.Symbol+newContract.Expiry, w.undoneContracts[c.PermID].Action, c.Strike, w.undoneContracts[c.PermID].TotalQuantity)
+			marketOrder := NewMarketOrder(w.undoneContracts[c.PermID].Action, w.undoneContracts[c.PermID].TotalQuantity)
 			Ic.PlaceOrder(Ic.GetReqID(), &newContract, marketOrder)
 			fmt.Println("MKT下单成功")
 		}
@@ -102,18 +99,16 @@ func (w CWrapper) ExecDetails(reqID int64, contract *Contract, execution *Execut
 	fmt.Println("接收到订单完成信息,结束检测")
 }
 
-// func (w CWrapper) OrderStatus(orderID int64, status string, filled float64, remaining float64, avgFillPrice float64, permID int64, parentID int64, lastFillPrice float64, clientID int64, whyHeld string, mktCapPrice float64) {
-// 	log.With(zap.Int64("orderID", orderID)).Info("<OrderStatus>",
-// 		zap.String("status", status),
-// 		zap.Float64("filled", filled),
-// 		zap.Float64("remaining", remaining),
-// 		zap.Float64("avgFillPrice", avgFillPrice),
-// 	)
-// }
+func (w CWrapper) OrderStatus(orderID int64, status string, filled float64, remaining float64, avgFillPrice float64, permID int64, parentID int64, lastFillPrice float64, clientID int64, whyHeld string, mktCapPrice float64) {
+	if w.undoneContracts[permID].PermID == permID && status == "Cancelled" {
+		delete(w.undoneContracts, permID)
+		fmt.Println("收到订单取消通知,先存在订单数目为:", len(w.undoneContracts))
+	}
+}
 
 func main() {
 	actionStatus = false
-	undoneContracts = make(map[int64]undoneContract, 10)
+
 	// internal api log is zap log, you could use GetLogger to get the logger
 	// besides, you could use SetAPILogger to set you own log option
 	// or you can just use the other logger
@@ -122,6 +117,7 @@ func main() {
 	// implement your own IbWrapper to handle the msg delivered via tws or gateway
 	// Wrapper{} below is a default implement which just log the msg
 	wrapper := &CWrapper{}
+	wrapper.undoneContracts = make(map[int64]undoneContract, 10)
 	Ic = NewIbClient(wrapper)
 
 	// tcp connect with tws or gateway
