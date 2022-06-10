@@ -244,8 +244,8 @@ comfirmReadyLoop:
 			MsgID, _ := strconv.ParseInt(string(f[0]), 10, 64)
 
 			ic.decoder.interpret(m)
-			// 处理单据好
-			if MsgID == 9{
+			// 处理单据号
+			if MsgID == 9 {
 				ic.updateReqId(bytesToInt(f[2]))
 			}
 			// check and del the msg ID
@@ -2997,7 +2997,7 @@ decodeLoop:
 
 // Run make the event loop run, all make sense after run!
 // Run is not blocked but just startup goRequest and goDecode
-// use LoopUntilDone instead to block the main routine
+// use LoopUntilDone instead to block the pro routine
 func (ic *IbClient) Run() error {
 	if !ic.IsConnected() {
 		ic.wrapper.Error(NO_VALID_ID, NOT_CONNECTED.code, NOT_CONNECTED.msg)
@@ -3030,11 +3030,12 @@ func (ic *IbClient) LoopUntilDone(fs ...func()) error {
 		return ic.err
 	}
 }
+
 /**
 更新orderId
- */
+*/
 func (ic *IbClient) updateReqId(reqId int64) {
-	if reqId > ic.reqIDSeq{
+	if reqId > ic.reqIDSeq {
 		ic.reqIDSeq = reqId
 	}
 }

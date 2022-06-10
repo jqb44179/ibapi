@@ -2,17 +2,27 @@ package main
 
 import (
 	"fmt"
-	. "github.com/hadrianl/ibapi"
+	. "github.com/jqb44179/ibapi"
+	"time"
 )
 
 var Ic *IbClient
-var actionStatus bool
-
-//var w.undoneContracts map[int64]undoneContract
 
 type CWrapper struct {
 	Wrapper
 	undoneContracts map[int64]undoneContract
+	optionChain     map[int64]OptionChain
+	undyingPrice    float64
+}
+type OptionChain struct {
+	repId                int64
+	underlyingContractId int64
+	tradingClass         string
+	strikes              float64
+	expirations          string
+	multiplier           string
+	optPrice             float64
+	right                string
 }
 type undoneContract struct {
 	Contract
@@ -21,7 +31,12 @@ type undoneContract struct {
 }
 
 func (w CWrapper) TickPrice(reqID int64, tickType int64, price float64, attrib TickAttrib) {
-	fmt.Println("TickPrice:", reqID, tickType, price, attrib)
+	//fmt.Println("TickPrice:", reqID, tickType, price, attrib)
+	typeName := "买价"
+	if tickType == 2 {
+		typeName = "卖价"
+	}
+	fprint(fmt.Sprintf("接收到单据价格信息,请求的id是:%d,类型是:%v,价格是:%v", reqID, typeName, price))
 }
 
 func (w *CWrapper) Error(reqID int64, errCode int64, errString string) {
@@ -29,14 +44,11 @@ func (w *CWrapper) Error(reqID int64, errCode int64, errString string) {
 		return
 	}
 	fmt.Println("Error:", reqID, errCode, errString)
-	//log.With(zap.Int64("reqID", reqID)).Info("<Error>",
-	//	zap.Int64("errCode", errCode),
-	//	zap.String("errString", errString),
-	//)
 }
 
 func (w *CWrapper) CompletedOrder(contract *Contract, order *Order, orderState *OrderState) {
-	fmt.Println("CompletedOrder:", contract, order, orderState)
+	//fmt.Println("CompletedOrder:", contract, order, orderState)
+	fmt.Println("CompletedOrder:", contract.Expiry, order.PermID, orderState.Status)
 }
 
 /**
@@ -47,13 +59,14 @@ func (w *CWrapper) CompletedOrder(contract *Contract, order *Order, orderState *
 func (w CWrapper) OpenOrder(orderID int64, contract *Contract, order *Order, orderState *OrderState) {
 	// 收到所有的信息
 	fmt.Println("接收到订单状态更变信息,开始检测", contract, order, orderState)
-	if contract.Symbol == "SPX" && orderState.Status == "PreSubmitted" && w.undoneContracts[order.PermID].PermID != order.PermID {
-		fmt.Println("接收到SPX已提交的订单,加入到w.undoneContracts")
+	if contract.Symbol == "SPX" && orderState.Status == "PreSubmitted" && order.OrderType == "STP" && w.undoneContracts[order.PermID].PermID != order.PermID {
+		fmt.Println("接收到SPX已提交的订单,加入到操作列表")
 		w.undoneContracts[order.PermID] = undoneContract{
 			*contract,
 			*orderState,
 			*order,
 		}
+		Ic.ReqMktData(order.PermID, contract, "", false, false, nil)
 	}
 	fmt.Println("接收到订单状态更变信息,结束检测", len(w.undoneContracts))
 }
@@ -106,9 +119,87 @@ func (w CWrapper) OrderStatus(orderID int64, status string, filled float64, rema
 	}
 }
 
-func main() {
-	actionStatus = false
+func (w CWrapper) ContractDetails(reqID int64, conDetails *ContractDetails) {
+	// 根据获取的合约详情,获取期权链信息
+	if conDetails.Contract.SecurityType == "IND" {
+		Ic.ReqSecDefOptParams(reqID, conDetails.Contract.Symbol, "", conDetails.Contract.SecurityType, conDetails.Contract.ContractID)
+	}
+	// 获取指数价格以及希腊等信息
+	if conDetails.Contract.SecurityType == "OPT" {
+		Ic.ReqMktData(reqID, &conDetails.Contract, "", false, false, nil)
+	}
+	fprint(fmt.Sprintf("接收到合约详情信息,合约内容是:%v", conDetails))
+}
+func (w CWrapper) SecurityDefinitionOptionParameter(reqID int64, exchange string, underlyingContractID int64, tradingClass string, multiplier string, expirations []string, strikes []float64) {
 
+	if exchange == "CBOE" && tradingClass == "SPXW" {
+		//if len(w.optionChain) < 0 {
+		if w.optionChain == nil {
+			w.optionChain = make(map[int64]OptionChain, 20)
+		}
+		for _, strike := range strikes {
+			if strike > 4000.00 && strike < 4200 {
+				// 不能超过上线
+				if len(w.optionChain) > 49 {
+					break
+				}
+				newReqId := Ic.GetReqID()
+				w.optionChain[newReqId] = OptionChain{
+					reqID,
+					underlyingContractID,
+					tradingClass,
+					strike,
+					expirations[0],
+					multiplier,
+					0,
+					"C",
+				}
+				index := Contract{
+					Symbol:       "SPX",
+					Exchange:     exchange,
+					SecurityType: "OPT",
+					Currency:     "USD",
+					TradingClass: tradingClass,
+					Expiry:       expirations[0],
+					Strike:       strike,
+					Right:        "C",
+					Multiplier:   multiplier,
+				}
+				Ic.ReqContractDetails(newReqId, &index)
+			}
+		}
+	}
+
+}
+
+func (w CWrapper) TickOptionComputation(reqID int64, tickType int64, tickAttrib int64, impliedVol float64, delta float64, optPrice float64, pvDiviedn float64, gamma float64, vega float64, theta float64, undPrice float64) {
+	//// bid
+	//if tickType == 10 {
+	//fprint(fmt.Sprintf("接收到买价信息,价格是:%v,标的物价格是:%v", optPrice, undPrice))
+	//}
+	//// ask
+	//if tickType == 11 {
+	// 保存指数价格
+	//if tickType == 13 {
+	//	w.undyingPrice = undPrice
+	//}
+}
+
+func (w CWrapper) TickSize(reqID int64, tickType int64, size int64) {
+	//// bid
+	//if tickType == 0 {
+	//	fprint(fmt.Sprintf("接收到买价数量,数量是:%v", size))
+	//}
+	//// ask
+	//if tickType == 3 {
+	//	fprint(fmt.Sprintf("接收到卖价数量,数量是:%v", size))
+	//}
+	//if tickType != 0 || tickType != 3 {
+	//fprint(fmt.Sprintf("接收到未知的数量,数量是:%v", size))
+	//}
+}
+
+func main() {
 	// internal api log is zap log, you could use GetLogger to get the logger
 	// besides, you could use SetAPILogger to set you own log option
 	// or you can just use the other logger
@@ -122,7 +213,8 @@ func main() {
 
 	// tcp connect with tws or gateway
 	// fail if tws or gateway had not yet set the trust IP
-	if err := Ic.Connect("127.0.0.1", 7497, 0); err != nil {
+	if err := Ic.Connect("8.218.27.42", 7497, 100); err != nil {
+		//if err := Ic.Connect("127.0.0.1", 7496, 0); err != nil {
 		log.Panic("Connect failed:", err)
 	}
 
@@ -132,44 +224,24 @@ func main() {
 	if err := Ic.HandShake(); err != nil {
 		log.Panic("HandShake failed:", err)
 	}
-	// 合约
-	//contract := Contract{
-	//	// ContractID:   Ic.GetReqID() + rand.Int63n(300000),
+	//index := Contract{
 	//	Symbol:       "SPX",
-	//	SecurityType: "OPT",
-	//	Expiry:       "20220519",
-	//	Strike:       200.0,
-	//	Right:        "C",
-	//	Multiplier:   "100",
 	//	Exchange:     "CBOE",
-	//	Currency:     "USD",
-	//	TradingClass: "SPX",
+	//	SecurityType: "IND",
 	//}
-
-	// orderId := Ic.GetReqID() + rand.Int63n(100000)
-	// Ic.ReqContractDetails(orderId, &contract)
-	// marketOrder := NewMarketOrder("BUY", 2)
-	//marketOrder := NewLimitOrder("BUY", 29, 2)
-	// order := Order{TotalQuantity: 2, OrderType: "MKT",Action: "BUY"}
-	//Ic.PlaceOrder(orderId, &contract, marketOrder)
-	//Ic.ReqMktData(orderId, &contract, "", false, false, nil)
-	//Ic.ReqScannerParameters()
-	// make some request, msg would be delivered via wrapper.
-	// req will not send to TWS or Gateway until Ic.Run()
-	// you could just call Ic.Run() before these
-	//Ic.ReqCurrentTime()
-	// Ic.ReqAutoOpenOrders(true)
-	// Ic.ReqAccountUpdates(true, "")
-	// Ic.ReqExecutions(Ic.GetReqID(), ExecutionFilter{})
-	// Ic.ReqAllOpenOrders()
-	//tags := "EquityWithLoanValue"
-	//Ic.ReqAccountSummary(Ic.GetReqID(), "All", tags)
-	Ic.ReqOpenOrders()
-	// Ic.ReqCompletedOrders(false)
-	// Ic.ReqAutoOpenOrders(false)
+	//Ic.ReqMarketDataType(1)
+	//// 获取期权连
+	//Ic.ReqContractDetails(Ic.GetReqID(), &index)
+	//Ic.ReqMktData(Ic.GetReqID(), &index, "", false, false, nil)
 	// start to send req and receive msg from tws or gateway after this
-	fmt.Println("开始处理消息")
+	fprint("开始处理消息")
+	//Ic.ReqOpenOrders()
+	Ic.ReqAllOpenOrders()
 	Ic.Run()
 	Ic.LoopUntilDone()
 
+}
+
+func fprint(msg string) {
+	fmt.Println(time.Now().Format("2006-01-02 15:04:05"), msg)
 }
