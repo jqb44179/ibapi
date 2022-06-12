@@ -213,8 +213,7 @@ func main() {
 
 	// tcp connect with tws or gateway
 	// fail if tws or gateway had not yet set the trust IP
-	if err := Ic.Connect("8.218.27.42", 7497, 100); err != nil {
-		//if err := Ic.Connect("127.0.0.1", 7496, 0); err != nil {
+	if err := Ic.Connect("127.0.0.1", 7496, 0); err != nil {
 		log.Panic("Connect failed:", err)
 	}
 
