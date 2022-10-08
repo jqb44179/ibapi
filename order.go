@@ -352,3 +352,26 @@ func NewMarketOrder(action string, quantity float64) *Order {
 
 	return o
 }
+
+// NewStpOrder create a Stp order with action , quantity and stopPrice
+func NewStpOrder(action string, quantity float64, stopPrice float64) *Order {
+	o := NewOrder()
+	o.OrderType = "STP"
+	o.Action = action
+	o.TotalQuantity = quantity
+	o.AuxPrice = stopPrice
+
+	return o
+}
+
+// NewStpLmtOrder create a Stp order with  action , quantity , auxPrice and stopPrice
+func NewStpLmtOrder(action string, quantity float64, auxPrice float64, stopPrice float64) *Order {
+	o := NewOrder()
+	o.OrderType = "STP LMT"
+	o.Action = action
+	o.TotalQuantity = quantity
+	o.AuxPrice = auxPrice
+	o.LimitPrice = stopPrice
+
+	return o
+}
