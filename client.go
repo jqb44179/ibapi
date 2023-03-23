@@ -2919,7 +2919,10 @@ func (ic *IbClient) goReceive() {
 			ic.err = err
 			// ic.Disconnect()
 			log.Debug("try to restart receiver")
-			go ic.goReceive()
+			// 禁止再次重连
+			//go ic.goReceive()
+			// 直接断开连接
+			ic.Disconnect()
 		} else {
 			select {
 			case <-ic.terminatedSignal:
